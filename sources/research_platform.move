@@ -215,6 +215,8 @@ module suifund::research_platform {
         // Register researcher if not exists
         if (!table::contains(&platform.researchers, researcher)) {
             table::add(&mut platform.researchers, researcher, create_researcher_profile(stake, ctx));
+        } else {
+            transfer::public_transfer(stake, ctx.sender());
         };
     
         linked_table::push_back(&mut platform.proposals, object::id(&proposal), proposal);
@@ -253,7 +255,7 @@ module suifund::research_platform {
         ctx: &mut TxContext,
     ) {
         let reviewer = tx_context::sender(ctx);
-        let proposal = linked_table::borrow_mut(&mut platform.proposals, proposal_id);
+        let proposal = linked_table::borrow(&platform.proposals, proposal_id);
     
         // Verify reviewer eligibility and stake
         assert!(is_eligible_reviewer(platform, reviewer, proposal), EReviewerConflict);
@@ -279,8 +281,9 @@ module suifund::research_platform {
             stake_amount: coin::value(&stake),
             verified: false,
         };
-    
-        table::add(&mut proposal.reviews, reviewer, review);
+
+        let proposal2 = linked_table::borrow_mut(&mut platform.proposals, proposal_id);
+        table::add(&mut proposal2.reviews, reviewer, review);
     
         // Update reviewer profile
         if (!table::contains(&platform.reviewers, reviewer)) {
@@ -288,6 +291,7 @@ module suifund::research_platform {
         } else {
             let reviewer_profile = table::borrow_mut(&mut platform.reviewers, reviewer);
             reviewer_profile.reviews_completed = reviewer_profile.reviews_completed + 1;
+            transfer::public_transfer(stake, ctx.sender());
         };
     }
     
@@ -308,7 +312,7 @@ module suifund::research_platform {
         // Calculate platform fee
         let governence_config = option::borrow<GovernanceConfig>(&platform.governance_config);
         let fee = amount * governence_config.fee_percentage / 10000;
-        let funding_balance = coin::into_balance(funding);
+        let mut funding_balance = coin::into_balance(funding);
         let fee_balance = balance::split(&mut funding_balance, fee);
     
         // Add to platform treasury
@@ -377,12 +381,14 @@ module suifund::research_platform {
             transfer::public_transfer(payment, proposal.researcher);
     
             // Update platform metrics
-            platform.impact_metrics.successful_projects =
-                platform.impact_metrics.successful_projects + 1;
+            let impact_metrics = option::borrow_mut<GlobalMetrics>(&mut platform.impact_metrics);
+
+            impact_metrics.successful_projects =
+                impact_metrics.successful_projects + 1;
     
             // Check if this was the final milestone
-            let all_completed = true;
-            let i = 0;
+            let mut all_completed = true;
+            let mut i = 0;
             while (i < vector::length(&proposal.milestones)) {
                 let milestone = vector::borrow(&proposal.milestones, i);
                 if (milestone.status.value != 2) {
@@ -407,7 +413,7 @@ module suifund::research_platform {
                 let project_id = object::id(proposal);
     
                 // Remove from active projects
-                let i = 0;
+                let mut i = 0;
                 while (i < vector::length(&researcher_profile.active_projects)) {
                     if (vector::borrow(&researcher_profile.active_projects, i) == &project_id) {
                         vector::remove(&mut researcher_profile.active_projects, i);
@@ -553,8 +559,8 @@ module suifund::research_platform {
     
         // Check if data follows expected structure
         // This is a simplified example - adapt based on your specific data format
-        let valid = true;
-        let i = 0;
+        let mut valid = true;
+        let mut i = 0;
         let len = vector::length(data);
     
         while (i < len) {
@@ -579,8 +585,8 @@ module suifund::research_platform {
         };
     
         // Verify hash is not all zeros
-        let all_zeros = true;
-        let i = 0;
+        let mut all_zeros = true;
+        let mut i = 0;
         while (i < 32) {
             if (*vector::borrow(hash, i) != 0) {
                 all_zeros = false;
@@ -605,7 +611,7 @@ module suifund::research_platform {
         // 4. Check merkle proofs
     
         // Example implementation (simplified):
-        let valid = true;
+        let mut valid = true;
     
         // Verify methodology hash integrity
         if (!verify_hash_integrity(methodology_hash)) {
@@ -633,8 +639,8 @@ module suifund::research_platform {
         };
     
         // Check hash distribution (simplified)
-        let zero_count = 0;
-        let i = 0;
+        let mut zero_count = 0;
+        let mut i = 0;
         while (i < 32) {
             if (*vector::borrow(hash, i) == 0) {
                 zero_count = zero_count + 1;
