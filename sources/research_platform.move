@@ -37,6 +37,11 @@ module suifund::research_platform {
         governance_config: Option<GovernanceConfig>,
         impact_metrics: Option<GlobalMetrics>,
     }
+
+    public struct PlatformCap has key, store {
+        id: UID,
+        `for` : ID
+    }
     
     public struct ResearchProposal has key, store {
         id: UID,
@@ -178,7 +183,21 @@ module suifund::research_platform {
             governance_config: option::none(),
             impact_metrics: option::none(),
         };
+        let cap = PlatformCap{
+            id: object::new(ctx),
+            `for`: object::id(&platform)
+        };
+        transfer::public_transfer(cap, ctx.sender());
         transfer::share_object(platform);
+    }
+
+    public fun set_platform(self: &mut Platform, cap: &PlatformCap, ctx: &mut TxContext) {
+        assert!(object::id(self) == cap.`for`, EInvalidProof);
+        let governance_config = create_default_governance_config(ctx);
+        let impact_metrics = create_default_metrics();
+
+        option::fill(&mut self.governance_config, governance_config);
+        option::fill(&mut self.impact_metrics, impact_metrics);
     }
 
     public fun create_proposal(
