@@ -235,7 +235,8 @@ module suifund::research_platform {
         if (!table::contains(&platform.researchers, researcher)) {
             table::add(&mut platform.researchers, researcher, create_researcher_profile(stake, ctx));
         } else {
-            transfer::public_transfer(stake, ctx.sender());
+            let researcher_profile = table::borrow_mut(&mut platform.researchers, researcher);
+            balance::join(&mut researcher_profile.stake, coin::into_balance(stake));
         };
     
         linked_table::push_back(&mut platform.proposals, object::id(&proposal), proposal);
@@ -310,7 +311,7 @@ module suifund::research_platform {
         } else {
             let reviewer_profile = table::borrow_mut(&mut platform.reviewers, reviewer);
             reviewer_profile.reviews_completed = reviewer_profile.reviews_completed + 1;
-            transfer::public_transfer(stake, ctx.sender());
+            balance::join(&mut reviewer_profile.stake, coin::into_balance(stake));
         };
     }
     
@@ -351,6 +352,15 @@ module suifund::research_platform {
         proof: ProofOfReproduction,
         ctx: &mut TxContext,
     ) {
+        // Verify deadline has not passed
+        let current_time = tx_context::epoch(ctx);
+        let proposal = linked_table::borrow_mut(&mut platform.proposals, proposal_id);
+        let milestone = vector::borrow(&proposal.milestones, milestone_index);
+        assert!(current_time <= milestone.deadline, EInvalidState);
+
+        // Verify proof matches verification method
+        assert!(verify_proof_matches_method(&proof, &milestone.verification_method), EInvalidProof);
+
         // Verify proposal exists and get mutable reference
         assert!(linked_table::contains(&platform.proposals, proposal_id), EProposalNotFound);
         let proposal = linked_table::borrow_mut(&mut platform.proposals, proposal_id);
@@ -447,6 +457,31 @@ module suifund::research_platform {
         };
     }
     
+    public fun submit_proof(
+        platform: &mut Platform,
+        proposal_id: ID,
+        milestone_index: u64,
+        evidence_hash: vector<u8>,
+        metadata: VecMap<String, String>,
+        ctx: &mut TxContext
+    ) {
+        let proposal = linked_table::borrow_mut(&mut platform.proposals, proposal_id);
+        
+        // Verify milestone index is valid
+        assert!(milestone_index < vector::length(&proposal.milestones), EInvalidMilestone);
+        
+        let proof = ProofSubmission {
+            submitter: tx_context::sender(ctx),
+            timestamp: tx_context::epoch(ctx),
+            evidence_hash,
+            metadata,
+            status: VerificationStatus { value: 0 }, // 0 = Pending
+        };
+        
+        let milestone = vector::borrow_mut(&mut proposal.milestones, milestone_index);
+        vector::push_back(&mut milestone.proof_submissions, proof);
+    }
+    
     // ======== Helper Functions ========
     
     fun create_default_governance_config(_ctx: &mut TxContext): GovernanceConfig {
@@ -468,6 +503,23 @@ module suifund::research_platform {
             total_citations: 0,
             platform_reputation: 0,
         }
+    }
+
+    fun verify_proof_matches_method(proof: &ProofOfReproduction, method: &VerificationMethod): bool {
+        // Verify method type, required proofs, and verification parameters
+        proof.status.value <= method.required_proofs && 
+            verify_method_type(proof, method.method_type) &&
+            verify_parameters(proof, &method.verification_params)
+    }
+
+    fun verify_method_type(_proof: &ProofOfReproduction, _method_type: u8): bool {
+        // Implement method type verification logic here
+        true // Placeholder implementation
+    }
+    
+    fun verify_parameters(_proof: &ProofOfReproduction, _params: &vector<u8>): bool {
+        // Implement parameter verification logic here
+        true // Placeholder implementation
     }
     
     fun create_researcher_profile(stake: Coin<SUI>, _ctx: &mut TxContext): ResearcherProfile {
@@ -491,7 +543,7 @@ module suifund::research_platform {
         }
     }
     
-    fun create_timeline(ctx: &mut TxContext): Timeline {
+    fun create_timeline(ctx: &TxContext): Timeline {
         let now = tx_context::epoch(ctx);
         Timeline {
             created_at: now,
@@ -685,6 +737,10 @@ module suifund::research_platform {
         data_length >= 64 && // Minimum length to contain both hashes
             vector::length(methodology_hash) == 32 &&
             vector::length(results_hash) == 32
+    }
+    
+    public fun get_milestone_description(milestone: &Milestone): String {
+        milestone.description
     }
     
     #[test_only]
